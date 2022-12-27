@@ -1,31 +1,16 @@
-import datetime
-import tkinter as tk
-
 import backend
+import frontend
+import threading
 
 if __name__ == "__main__":
 
-    tableInfo = backend.initSesion("bd-dc.cs.tuiasi.ro", 1539, "orcl", "bd018", "bd018")
-    # table = tableInfo[0][backend.TABLE_NAME]
-    # backend.insertIntoTable(table, (20, "Test"))
-    #
-    # info = backend.getTableData('CLIENTI')
-    # for x in info:
-    #    print(x)
-    #
-    # print("_" * 20)
-    #
-    # pkCol = backend.getPkColumnName(tableInfo, tableName=table)
-    # print(pkCol)
-    # pkVal = 20
-    # backend.deleteFromTable(table, pkCol, pkVal)
-    #
-    #
-    #
-    # info2 = backend.getTableData(table)
-    # for x in info2:
-    #     print(x)
+    # Initialize connection to DB and get table information
+    backend.initSesion("localhost/xe", "guiuser", "gui")
+    # backend.initSesion("bd-dc.cs.tuiasi.ro:1539/orcl", "bd026", "bd026")
 
-    for x in tableInfo:
-        print(x)
-
+    # Initialize
+    frontend.initGui()
+    # Run
+    frontend.runGui()
+    # Close DB conection
+    backend.closeConnection()

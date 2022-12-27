@@ -1,4 +1,5 @@
 import datetime
+import frontend
 
 import cx_Oracle as cx
 
@@ -8,14 +9,36 @@ PK = 2
 FOREIGN_KEYS = 3
 
 con = None
+tableInfo = []
 
 
-def getPkColumnName(tableInfo, tableName: str) -> str:
+def writeError(errMesage: str):
+    file = open("errorLog.txt", "a")
+    file.write(str(datetime.datetime.now()) + ": " + errMesage + "\n")
+    file.close()
+    frontend.errorWindow()
+
+
+def getPkColumnName(tableName: str) -> str:
+    global tableInfo
+
     for tables in tableInfo:
         if tables[TABLE_NAME] == tableName:
             return tables[COLUMNS][tables[PK][0] - 1][0]
 
     return ""
+
+
+def getTableNumber(tableName):
+    global tableInfo
+
+    i = 0
+    for tables in tableInfo:
+        if tables[TABLE_NAME] == tableName:
+            return i
+        i += 1
+
+    return i
 
 
 def convertToSqlString(val):
@@ -24,12 +47,12 @@ def convertToSqlString(val):
         return "NULL, "
 
     # Check for numeric value
-    if type(val) == int:
+    if type(val) == int or type(val) == float:
         return str(val) + ", "
 
     # Check for date value
     if type(val) == datetime.datetime:
-        return "to_date(" + str(val.date()) + ", RRRR-MM-DD), "
+        return "to_date(\'" + str(val.date()) + "\', \'RRRR-MM-DD\'), "
 
     # Check for str value
     if type(val) == str:
@@ -42,6 +65,16 @@ def convertToSqlString(val):
     return ", "
 
 
+def getFkReferencedTable(tableName: str, colName: str) -> str:
+    tableNr = getTableNumber(tableName)
+
+    for fkInfo in tableInfo[tableNr][FOREIGN_KEYS]:
+        if colName == fkInfo[0]:
+            return fkInfo[1]
+
+    return ""
+
+
 def executeQuery(query: str):
 
     res = []
@@ -49,7 +82,7 @@ def executeQuery(query: str):
         cursor = con.cursor()
         cursor.execute(query)
     except Exception as e:
-        print(str(e))
+        writeError(str(e))
         return []
 
     # Check for result
@@ -57,22 +90,19 @@ def executeQuery(query: str):
         for x in cursor:
             res.append(x)
     finally:
-
-        cursor.execute("COMMIT")
+        cursor.close()
+        # cursor.execute("COMMIT")
         return res
 
 
-def initSesion(address: str, port: int, serviceName: str, user: str, password: str) -> list:
+def initSesion(dns: str, user: str, password: str):
 
     # Creating a connection
-    global con
-    dns = cx.makedsn(address, port, service_name=serviceName)
+    global con, tableInfo
     try:
         con = cx.connect(user=user, password=password, dsn=dns)
     except Exception as e:
-        file = open("errorLog.txt")
-        file.write("Failed to connect to database: " + str(e))
-        file.close()
+        writeError(": Failed to connect to database: " + str(e))
         exit(-1)
 
     print("Connection established")
@@ -87,7 +117,7 @@ def initSesion(address: str, port: int, serviceName: str, user: str, password: s
     # Get table columns
     for infoTuple in tableInfo:
         # TO DO
-        qResult = executeQuery("SELECT column_name, data_type FROM all_tab_cols WHERE table_name = \'" + infoTuple[TABLE_NAME] + "\'")
+        qResult = executeQuery("SELECT column_name, data_type FROM user_tab_cols WHERE table_name = \'" + infoTuple[TABLE_NAME] + "\' ORDER BY column_id")
         for x in qResult:
             infoTuple[COLUMNS].append(x)
 
@@ -114,14 +144,27 @@ def initSesion(address: str, port: int, serviceName: str, user: str, password: s
         for x in qResult:
             infoTuple[FOREIGN_KEYS].append((x[0], x[1]))
 
-    return tableInfo
-
 
 def getTableData(tableName: str) -> list:
     res = []
 
     if con is not None:
         qResult = executeQuery("SELECT * FROM " + tableName)
+
+        for x in qResult:
+            res.append(x)
+
+    return res
+
+
+def getTableDataByPk(tableName: str, pkVal) -> list:
+    res = []
+    pkCol = getPkColumnName(tableName)
+    pkStr = convertToSqlString(pkVal)
+    pkStr = pkStr[:len(pkStr) - 2]
+
+    if con is not None:
+        qResult = executeQuery("SELECT * FROM " + tableName + " WHERE " + pkCol + " = " + pkStr)
 
         for x in qResult:
             res.append(x)
@@ -137,12 +180,35 @@ def insertIntoTable(tableName: str, values: tuple):
 
     # Delete last ", " and put ")" instead
     valuesString = valuesString[:len(valuesString) - 2] + ")"
-
     executeQuery("INSERT INTO " + tableName + " VALUES " + valuesString)
-    executeQuery("COMMIT")
 
 
-def deleteFromTable(tableName: str, pk_column: str, pkVal):
+def deleteFromTable(tableName: str, pkVal):
     valStr = convertToSqlString(pkVal)
     valStr = valStr[:len(valStr) - 2]
-    executeQuery("DELETE FROM " + tableName + " WHERE " + pk_column + " = " + valStr)
+    executeQuery("DELETE FROM " + tableName + " WHERE " + getPkColumnName(tableName) + " = " + valStr)
+
+
+def modifyValueFromTable(tableName, pkVal, newVals: tuple):
+    global tableInfo
+
+    setString = ""
+
+    tableNr = getTableNumber(tableName)
+    pkName = getPkColumnName(tableName)
+    pkValStr = convertToSqlString(pkVal)
+    pkValStr = pkValStr[:len(pkValStr) - 2]
+
+    i = 0
+    for val in newVals:
+        # Add column name and new val
+        setString += tableInfo[tableNr][COLUMNS][i][0] + " = " + convertToSqlString(val)
+        i += 1
+    # Remove last ", "
+    setString = setString[:len(setString) - 2]
+    executeQuery("UPDATE " + tableName + " SET " + setString + " WHERE " + pkName + " = " + pkValStr)
+
+
+def closeConnection():
+    if con is not None:
+        con.close()

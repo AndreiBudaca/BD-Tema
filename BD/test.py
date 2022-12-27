@@ -1,0 +1,1 @@
+print(tuple([0] * 3))
