@@ -10,13 +10,20 @@ FOREIGN_KEYS = 3
 
 con = None
 tableInfo = []
+savepointList = []
 
 
-def writeError(errMesage: str):
+def writeError(errMessage: str):
     file = open("errorLog.txt", "a")
-    file.write(str(datetime.datetime.now()) + ": " + errMesage + "\n")
+    file.write(str(datetime.datetime.now()) + ": " + errMessage + "\n")
     file.close()
     frontend.errorWindow()
+
+
+def clearLog():
+    file = open("errorLog.txt", "w")
+    file.write("")
+    file.close()
 
 
 def getPkColumnName(tableName: str) -> str:
@@ -83,29 +90,27 @@ def executeQuery(query: str):
         cursor.execute(query)
     except Exception as e:
         writeError(str(e))
-        return []
-
-    # Check for result
-    try:
-        for x in cursor:
-            res.append(x)
     finally:
-        cursor.close()
-        # cursor.execute("COMMIT")
-        return res
+        # Check for result
+        try:
+            for x in cursor:
+                res.append(x)
+            cursor.close()
+        finally:
+            return res
 
 
-def initSesion(dns: str, user: str, password: str):
+def initSession(dsn: str, user: str, password: str):
 
     # Creating a connection
     global con, tableInfo
     try:
-        con = cx.connect(user=user, password=password, dsn=dns)
+        con = cx.connect(user=user, password=password, dsn=dsn)
     except Exception as e:
         writeError(": Failed to connect to database: " + str(e))
         exit(-1)
 
-    print("Connection established")
+    # print("Connection established")
 
     # Get table names
     tableInfo = []
@@ -117,7 +122,8 @@ def initSesion(dns: str, user: str, password: str):
     # Get table columns
     for infoTuple in tableInfo:
         # TO DO
-        qResult = executeQuery("SELECT column_name, data_type FROM user_tab_cols WHERE table_name = \'" + infoTuple[TABLE_NAME] + "\' ORDER BY column_id")
+        qResult = executeQuery("SELECT column_name, data_type FROM user_tab_cols WHERE table_name = \'"
+                               + infoTuple[TABLE_NAME] + "\' ORDER BY column_id")
         for x in qResult:
             infoTuple[COLUMNS].append(x)
 
@@ -143,6 +149,38 @@ def initSesion(dns: str, user: str, password: str):
 
         for x in qResult:
             infoTuple[FOREIGN_KEYS].append((x[0], x[1]))
+
+
+def createSavepoint(savePointName: str):
+
+    # Check for valid savepoint name
+    if savePointName is None or savePointName == "":
+        found = False
+        savePointName = "Savepoint1"
+        nextVal = 2
+        while not found:
+            if savePointName not in savepointList:
+                found = True
+            else:
+                savePointName = savePointName[:len(savePointName) - len(str(nextVal - 1))] + str(nextVal)
+                nextVal += 1
+
+    # Add the savepoint to savepoint list
+    savepointList.append(savePointName)
+    # Execute query
+    executeQuery("SAVEPOINT " + savePointName)
+
+
+def rollbackTo(savePointName: str):
+    global savepointList
+    if savePointName in savepointList:
+        index = savepointList.index(savePointName)
+        if index == 0:
+            savepointList = savepointList[:1]
+        else:
+            savepointList = savepointList[:index + 1]
+
+        executeQuery("ROLLBACK TO " + savePointName)
 
 
 def getTableData(tableName: str) -> list:
@@ -210,5 +248,7 @@ def modifyValueFromTable(tableName, pkVal, newVals: tuple):
 
 
 def closeConnection():
-    if con is not None:
+    try:
         con.close()
+    except:
+        pass

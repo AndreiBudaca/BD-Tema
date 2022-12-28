@@ -2,10 +2,51 @@ import tkinter as tk
 from tkinter import ttk, font
 import backend
 import datetime
-from functools import partial
 
 mainWindow = None
 currPanel = None
+
+dsn = ""
+user = ""
+password = ""
+
+
+def connectAction(window):
+    global dsn, user, password
+    dsn = window.children.get("dsn").get()
+    user = window.children.get("user").get()
+    password = window.children.get("password").get()
+    window.destroy()
+
+
+def connectWindow():
+    connWin = tk.Tk(className="Connect")
+    connWin.geometry("210x300")
+    ttk.Label(connWin, text="\tEnter connection info").grid(row=1, sticky="EW", pady=25)
+
+    # dns
+    ttk.Label(connWin, text="DSN").grid(row=2)
+    e1 = ttk.Entry(connWin, name="dsn", width=32)
+    e1.insert(0, "localhost/xe")
+    e1.grid(row=3, padx=5)
+
+    # user
+    ttk.Label(connWin, text="USER").grid(row=4)
+    e2 = ttk.Entry(connWin, name="user", width=32)
+    e2.insert(0, "guiuser")
+    e2.grid(row=5, padx=5)
+
+    # user
+    ttk.Label(connWin, text="PASSWORD").grid(row=6)
+    e3 = ttk.Entry(connWin, name="password", width=32, show="*")
+    e3.insert(0, "gui")
+    e3.grid(row=7, padx=5)
+
+    ttk.Button(connWin, text="Ok", command=lambda: connectAction(connWin)).grid(row=8)
+
+    connWin.eval('tk::PlaceWindow . center')
+    connWin.resizable(False, False)
+    connWin.mainloop()
 
 
 def errorWindow(text="An error has occurred. Check error log"):
@@ -14,6 +55,7 @@ def errorWindow(text="An error has occurred. Check error log"):
     ttk.Label(errorWin, text=text).grid(row=1, sticky="EW")
     ttk.Button(errorWin, text="Ok", command=errorWin.destroy).grid(row=2)
     errorWin.eval('tk::PlaceWindow . center')
+    errorWin.resizable(False, False)
     errorWin.mainloop()
 
 
@@ -38,16 +80,17 @@ def convertToPrintableString(val) -> str:
 
 
 def setHomeScreen():
-    global currPanel
+    global currPanel, mainWindow
 
     if currPanel is not None:
-        currPanel.grid_forget()
+        currPanel.destroy()
 
     currPanel = ttk.Frame(mainWindow)
     helloLabel = ttk.Label(currPanel, text="\n\n\n\n  Welcome to GUI Database Manager", font=font.Font(size=34))
     helloLabel.grid(row=1)
     infoLabel = ttk.Label(currPanel, text="\nSelect an action from the menubar", font=font.Font(size=14))
-    infoLabel.grid(row=2)
+    infoLabel.grid(row=2, pady=15)
+
     currPanel.grid()
 
 
@@ -56,8 +99,7 @@ def deleteAction(tableName: str, pkVal):
     setTableScreen(tableName)
 
 
-def modifyAction(popUpWindow, filedsMaster, ddMenuOption: dict, tableName: str, pkVal, notInsertOrModify):
-
+def modifyAction(popUpWindow, fieldsMaster, ddMenuOption: dict, tableName: str, pkVal, notInsertOrModify):
     pkName = backend.getPkColumnName(tableName)
     tableNr = backend.getTableNumber(tableName)
     insertData = []
@@ -65,41 +107,54 @@ def modifyAction(popUpWindow, filedsMaster, ddMenuOption: dict, tableName: str, 
     for colInfo in backend.tableInfo[tableNr][backend.COLUMNS]:
         # If value is not pk insert the value
         if colInfo[0] != pkName:
-            infoWidget = filedsMaster.children.get(colInfo[0].lower())
+
+            # Get the value form corresponding widget
+            infoWidget = fieldsMaster.children.get(colInfo[0].lower())
+            # In case of dd menus you cannot set names
             if infoWidget is None:
                 infoWidget = ddMenuOption.get(colInfo[0].lower())
-                try:
+                if infoWidget is not None:
                     rawVal = infoWidget.get().split(" ")[0]
-                except:
-                    backend.closeConnection()
-                    exit(0)
+                else:
+                    rawVal = None
+
             else:
-                try:
-                    rawVal = infoWidget.get()
-                except:
-                    backend.closeConnection()
-                    exit(0)
+                rawVal = infoWidget.get()
+
         else:
             rawVal = pkVal if notInsertOrModify else None
+
+        if rawVal == "NULL":
+            rawVal = None
 
         # Convert rawVal to expected type
         if colInfo[1] == "VARCHAR" or colInfo[1] == "VARCHAR2" and rawVal is not None:
             insertData.append(rawVal)
+
         if colInfo[1] == "NUMBER" and rawVal is not None:
             try:
                 insertData.append(float(rawVal))
             except:
+                infoWidget.delete(0, tk.END)
+                infoWidget.insert(0, "INSERT A NUMBER!")
                 errorWindow("Numeric value expected!")
+                return
+
         if colInfo[1] == "DATE" and rawVal is not None:
             dates = rawVal.split("-")
             if len(dates) != 3:
+                infoWidget.delete(0, tk.END)
+                infoWidget.insert(0, "INSERT A DATE!")
                 errorWindow("Date value expected!")
                 return
             try:
                 insertData.append(datetime.datetime(year=int(dates[0]), month=int(dates[1]), day=int(dates[2])))
             except:
+                infoWidget.delete(0, tk.END)
+                infoWidget.insert(0, "INSERT A DATE!")
                 errorWindow("Date value expected!")
                 return
+
         if rawVal is None:
             insertData.append(None)
 
@@ -111,27 +166,26 @@ def modifyAction(popUpWindow, filedsMaster, ddMenuOption: dict, tableName: str, 
     try:
         popUpWindow.destroy()
     except:
-        backend.closeConnection()
-        exit(0)
+        pass
+
     setTableScreen(tableName)
 
 
-
 def modifyPopUp(tableName: str, pkVal, notInsertOrModify: bool):
-
     tableNr = backend.getTableNumber(tableName)
     table = backend.tableInfo[tableNr]
     fkNewVals = {}
     modifyWindow = tk.Tk(className="Modify" if notInsertOrModify else "Insert")
-    modifyWindow.geometry("400x400")
+    modifyWindow.geometry("500x400")
     modifyWindow.eval('tk::PlaceWindow . center')
+    modifyWindow.resizable(False, False)
 
     # Modify label
     ttk.Label(modifyWindow, text="Modify values bellow" if notInsertOrModify else "Insert values bellow",
-              font=font.Font(size=12, weight='bold')).grid(row=1, column=1, pady=15,)
+              font=font.Font(size=12, weight='bold')).grid(row=1, column=1, pady=15)
 
     # Value field
-    canvas = tk.Canvas(modifyWindow, width=370, height=300)
+    canvas = tk.Canvas(modifyWindow, width=480, height=290)
     scrollbar1 = ttk.Scrollbar(modifyWindow, orient="vertical", command=canvas.yview)
     scrollbar2 = ttk.Scrollbar(modifyWindow, orient="horizontal", command=canvas.xview)
     valuesGrid = ttk.Frame(canvas)
@@ -192,7 +246,10 @@ def modifyPopUp(tableName: str, pkVal, notInsertOrModify: bool):
                     optList.append(tupleString)
 
                 # Create drop down menu
-                tk.OptionMenu(valuesGrid, variable, optList[0], *(optList[1:])).grid(row=row, column=2)
+                if len(optList) > 0:
+                    tk.OptionMenu(valuesGrid, variable, optList[0], *(optList[1:])).grid(row=row, column=2)
+                else:
+                        variable.set("NULL")
 
             else:
                 # Normal entry if not FK
@@ -210,8 +267,8 @@ def modifyPopUp(tableName: str, pkVal, notInsertOrModify: bool):
 
     # Modify button
     ttk.Button(modifyWindow, text="Modify" if notInsertOrModify else "Insert",
-               command=partial(modifyAction, modifyWindow, valuesGrid, fkNewVals, tableName, pkVal, notInsertOrModify))\
-        .grid(row=4, column=1)
+               command=lambda: modifyAction(modifyWindow, valuesGrid, fkNewVals, tableName, pkVal, notInsertOrModify)) \
+        .grid(row=4, column=1, pady=5)
 
 
 def setTableScreen(tableName: str):
@@ -221,6 +278,7 @@ def setTableScreen(tableName: str):
     nrCols = len(backend.tableInfo[tableNr][backend.COLUMNS])
 
     if currPanel is not None:
+        # App closing error fix
         try:
             currPanel.destroy()
         except:
@@ -233,8 +291,8 @@ def setTableScreen(tableName: str):
     tableLabel = ttk.Label(currPanel, text=tableName, font=font.Font(size=14, weight='bold'))
     tableLabel.grid(row=1, column=2, pady=30)
 
-    # Create scrolable canvas
-    canvas = tk.Canvas(currPanel, width=750, height=300)
+    # Create scrollable canvas
+    canvas = tk.Canvas(currPanel, width=750, height=350)
     scrollbar1 = ttk.Scrollbar(currPanel, orient="vertical", command=canvas.yview)
     scrollbar2 = ttk.Scrollbar(currPanel, orient="horizontal", command=canvas.xview)
     tableGrid = ttk.Frame(canvas)
@@ -249,7 +307,6 @@ def setTableScreen(tableName: str):
     canvas.configure(yscrollcommand=scrollbar1.set, xscrollcommand=scrollbar2.set)
 
     # Add table columns
-    colString = "\n\n"
     col = 1
     for column in backend.tableInfo[tableNr][backend.COLUMNS]:
         ttk.Label(tableGrid, text=column[0], font=font.Font(size=10, weight='bold')) \
@@ -271,13 +328,13 @@ def setTableScreen(tableName: str):
                 # Create delete button
                 ttk.Button(
                     tableGrid, text="Delete",
-                    command=partial(deleteAction, tableName, x)
+                    command=lambda arg1=tableName, arg2=x: deleteAction(arg1, arg2)
                 ).grid(column=nrCols + 2, row=i, padx=15)
 
                 # Create modify button
                 ttk.Button(
                     tableGrid, text="Modify",
-                    command=partial(modifyPopUp, tableName, x, True)
+                    command=lambda arg1=tableName, arg2=x: modifyPopUp(arg1, arg2, True)
                 ).grid(column=nrCols + 1, row=i, padx=15)
 
             col += 1
@@ -289,25 +346,26 @@ def setTableScreen(tableName: str):
 
     ttk.Button(
         currPanel, text="Insert new value",
-        command=partial(modifyPopUp, tableName, None, False)
+        command=lambda arg=tableName: modifyPopUp(arg, None, False)
     ).grid(column=2, row=4, pady=30)
 
     currPanel.grid()
+
+
+def clearLogAction():
+    backend.clearLog()
+    setErrorLogScreen()
 
 
 def setErrorLogScreen():
     global currPanel, mainWindow
 
     if currPanel is not None:
-        try:
-            currPanel.destroy()
-        except:
-            backend.closeConnection()
-            exit(0)
+        currPanel.grid_forget()
 
     currPanel = ttk.Frame(mainWindow)
-    # Create scrolable canvas
-    canvas = tk.Canvas(currPanel, width=770, height=550)
+    # Create scrollable canvas
+    canvas = tk.Canvas(currPanel, width=770, height=530)
     scrollbar1 = ttk.Scrollbar(currPanel, orient="vertical", command=canvas.yview)
     scrollbar2 = ttk.Scrollbar(currPanel, orient="horizontal", command=canvas.xview)
     logGrid = ttk.Frame(canvas)
@@ -329,6 +387,113 @@ def setErrorLogScreen():
     canvas.grid(row=2, column=2)
     scrollbar1.grid(row=2, column=3, sticky="NS")
     scrollbar2.grid(row=3, column=2, sticky="EW")
+
+    ttk.Button(currPanel, text="Clear log", command=clearLogAction).grid(row=4, column=2, pady=10)
+
+    currPanel.grid()
+
+
+def savepointAction(popWindow):
+    backend.createSavepoint(popWindow.children.get("savepointName").get())
+    popWindow.destroy()
+
+
+def savepointPopUp():
+    savepointWindow = tk.Tk(className="Savepoint")
+    savepointWindow.geometry("210x100")
+    savepointWindow.eval('tk::PlaceWindow . center')
+    savepointWindow.resizable(False, False)
+
+    ttk.Entry(savepointWindow, name="savepointName", width=32).grid(row=2, pady=5, padx=5)
+    ttk.Label(savepointWindow, text="\tInsert savepoint name").grid(row=1, sticky="EW", pady=5, padx=5)
+    ttk.Button(savepointWindow, text="Create savepoint", command=lambda: savepointAction(savepointWindow))\
+        .grid(row=3, pady=5, padx=5)
+
+    savepointWindow.mainloop()
+
+
+def rollbackAction(window, var):
+    backend.rollbackTo(var.get())
+    setHomeScreen()
+    window.destroy()
+
+
+def rollbackPopUp():
+    saveList = backend.savepointList
+    if len(saveList) > 0:
+        rollbackWindow = tk.Tk(className="Savepoint")
+        rollbackWindow.geometry("210x110")
+        rollbackWindow.eval('tk::PlaceWindow . center')
+        rollbackWindow.resizable(False, False)
+
+        var = tk.StringVar(rollbackWindow, value="Choose savepoint")
+
+        tk.OptionMenu(rollbackWindow, var, saveList[0], *(saveList[1:])).grid(row=2, pady=5, padx=5)
+        ttk.Label(rollbackWindow, text="Select desired savepoint").grid(row=1, pady=5, padx=40)
+        ttk.Button(rollbackWindow, text="Rollback", command=lambda: rollbackAction(rollbackWindow, var)) \
+            .grid(row=3, pady=5, padx=5)
+
+        rollbackWindow.mainloop()
+
+
+def executeAction(textWidget, canvas):
+
+    tableGrid = ttk.Frame(canvas)
+    tableGrid.bind(
+        "<Configure>",
+        lambda e: canvas.configure(
+            scrollregion=canvas.bbox("all")
+        )
+    )
+    canvas.create_window((0, 0), window=tableGrid, anchor="nw")
+
+    query = textWidget.get(1.0, tk.END)
+    values = backend.executeQuery(query)
+
+    i = 1
+    for val in values:
+        col = 1
+        for x in val:
+            ttk.Label(tableGrid, text=convertToPrintableString(x), font=font.Font(size=9)) \
+                .grid(row=i, column=col, sticky="W", padx=15)
+            col += 1
+        i += 1
+
+
+def setTerminalScreen():
+    global currPanel, mainWindow
+
+    if currPanel is not None:
+        # App closing error fix
+        try:
+            currPanel.destroy()
+        except:
+            backend.closeConnection()
+            exit(0)
+
+    currPanel = ttk.Frame(mainWindow)
+
+    # Results label
+    ttk.Label(currPanel, text="Results", font=font.Font(size=14, weight='bold'))\
+        .grid(row=1, column=1, pady=20)
+
+    # Create scrollable canvas
+    canvas = tk.Canvas(currPanel, width=750, height=350)
+    scrollbar1 = ttk.Scrollbar(currPanel, orient="vertical", command=canvas.yview)
+    scrollbar2 = ttk.Scrollbar(currPanel, orient="horizontal", command=canvas.xview)
+
+    canvas.configure(yscrollcommand=scrollbar1.set, xscrollcommand=scrollbar2.set)
+
+    canvas.grid(row=2, column=1)
+    scrollbar1.grid(row=2, column=2, sticky="NS")
+    scrollbar2.grid(row=3, column=1, sticky="EW")
+
+    # Add text widget
+    text = tk.Text(currPanel, width=85, height=8)
+    text.grid(row=4, column=1)
+
+    # Add Execute button
+    ttk.Button(currPanel, text="Execute", command=lambda: executeAction(text, canvas)).grid(row=5, column=1, pady=5)
 
     currPanel.grid()
 
@@ -353,7 +518,7 @@ def initGui():
     for table in backend.tableInfo:
         tableMenu.add_command(
             label=table[backend.TABLE_NAME],
-            command=partial(setTableScreen, table[backend.TABLE_NAME])
+            command=lambda e=table[backend.TABLE_NAME]: setTableScreen(e)
         )
     menubar.add_cascade(
         label="Tables",
@@ -361,23 +526,28 @@ def initGui():
     )
 
     # Create terminal option
-    menubar.add_command(label="SQL Terminal")
+    menubar.add_command(
+        label="SQL Terminal",
+        command=setTerminalScreen
+    )
 
     # Add commit and rollback
-    sesionMenu = tk.Menu(menubar, tearoff=0)
-    sesionMenu.add_command(
-        label="Rollback"
+    sessionMenu = tk.Menu(menubar, tearoff=0)
+    sessionMenu.add_command(
+        label="Rollback",
+        command=rollbackPopUp
     )
-    sesionMenu.add_command(
-        label="Savepoint"
+    sessionMenu.add_command(
+        label="Savepoint",
+        command=savepointPopUp
     )
-    sesionMenu.add_command(
+    sessionMenu.add_command(
         label="Commit",
-        command=partial(backend.executeQuery, "COMMIT")
+        command=lambda: backend.executeQuery("COMMIT")
     )
     menubar.add_cascade(
-        label="Sesion",
-        menu=sesionMenu
+        label="Session",
+        menu=sessionMenu
     )
 
     # Add error log

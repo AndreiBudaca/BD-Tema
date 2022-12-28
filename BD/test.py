@@ -1,1 +1,1 @@
-print(tuple([0] * 3))
+print(len(23))
