@@ -99,7 +99,13 @@ def deleteAction(tableName: str, pkVal):
     setTableScreen(tableName)
 
 
-def modifyAction(popUpWindow, fieldsMaster, ddMenuOption: dict, tableName: str, pkVal, notInsertOrModify):
+def addFkAction():
+    pass
+
+
+def modifyAction(popUpWindow, fieldsMaster, ddMenuOption: dict, tableName: str, pkVal, notInsertOrModify: bool,
+                 savepoint: str, switchTable: bool, master, widgetToUpdate: tk.OptionMenu, widgetVar: tk.Variable):
+
     pkName = backend.getPkColumnName(tableName)
     tableNr = backend.getTableNumber(tableName)
     insertData = []
@@ -124,7 +130,7 @@ def modifyAction(popUpWindow, fieldsMaster, ddMenuOption: dict, tableName: str, 
         else:
             rawVal = pkVal if notInsertOrModify else None
 
-        if rawVal == "NULL":
+        if rawVal == "NULL" or rawVal == "Select":
             rawVal = None
 
         # Convert rawVal to expected type
@@ -143,6 +149,7 @@ def modifyAction(popUpWindow, fieldsMaster, ddMenuOption: dict, tableName: str, 
         if colInfo[1] == "DATE" and rawVal is not None:
             dates = rawVal.split("-")
             if len(dates) != 3:
+                print(infoWidget.get())
                 infoWidget.delete(0, tk.END)
                 infoWidget.insert(0, "INSERT A DATE!")
                 errorWindow("Date value expected!")
@@ -158,27 +165,87 @@ def modifyAction(popUpWindow, fieldsMaster, ddMenuOption: dict, tableName: str, 
         if rawVal is None:
             insertData.append(None)
 
+    # Insert/Modify value
     if notInsertOrModify:
         backend.modifyValueFromTable(tableName, pkVal, tuple(insertData))
     else:
         backend.insertIntoTable(tableName, tuple(insertData))
 
+    # Update widget if needed (in case of fk inserts -> widget will always be OptionMenu)
+    if widgetToUpdate is not None:
+        # Get insert data
+        optList = []
+        # Get values from referenced table
+        referencedVals = backend.getTableData(tableName)
+
+        for valTuple in referencedVals:
+            # Concat vals (first val will always be PK)
+            refNr = backend.getTableNumber(tableName)
+            if len(backend.tableInfo[refNr][backend.PK]) > 0:
+                pkNr = backend.tableInfo[refNr][backend.PK][0]
+            else:
+                pkNr = -1
+
+            tupleString = convertToPrintableString(valTuple[pkNr - 1]) + " "
+            tupleNr = 0
+            for val in valTuple:
+                if tupleNr != pkNr - 1:
+                    tupleString += convertToPrintableString(val) + " "
+                tupleNr += 1
+
+            optList.append(tupleString)
+
+        # Add null option
+        optList.append("NULL")
+
+        widgetToUpdate['menu'].delete(0, 'end')
+        for opt in optList:
+            widgetToUpdate['menu'].add_command(label=opt, command=tk._setit(widgetVar, opt))
+
     try:
+        if master is not None:
+            master.deiconify()
         popUpWindow.destroy()
     except:
         pass
 
-    setTableScreen(tableName)
+    backend.deteleSavepoint(savepoint)
+
+    if switchTable:
+        setTableScreen(tableName)
 
 
-def modifyPopUp(tableName: str, pkVal, notInsertOrModify: bool):
+def modifyPopUp(tableName: str, pkVal, notInsertOrModify: bool, switchTable=True, master=None, menu=None, manuVar=None):
+    # Get table info to create GUI
     tableNr = backend.getTableNumber(tableName)
     table = backend.tableInfo[tableNr]
     fkNewVals = {}
-    modifyWindow = tk.Tk(className="Modify" if notInsertOrModify else "Insert")
+    modifyWindow = tk.Tk(className="modify" if notInsertOrModify else "insert")
     modifyWindow.geometry("500x400")
     modifyWindow.eval('tk::PlaceWindow . center')
     modifyWindow.resizable(False, False)
+
+    # Create savepoint for transactions
+    savepoint = backend.createSavepoint(tableName)
+
+    # Hide master (if any)
+    if master is not None:
+        master.withdraw()
+
+    # Create close function
+    def closePopup():
+        # Rollback
+        backend.rollbackTo(savepoint)
+        # Delete the savepoint
+        backend.deteleSavepoint(savepoint)
+        # Display master
+        if master is not None:
+            master.deiconify()
+        # Close the window
+        modifyWindow.destroy()
+
+    # Bind function to X button
+    modifyWindow.protocol('WM_DELETE_WINDOW', closePopup)
 
     # Modify label
     ttk.Label(modifyWindow, text="Modify values bellow" if notInsertOrModify else "Insert values bellow",
@@ -203,7 +270,6 @@ def modifyPopUp(tableName: str, pkVal, notInsertOrModify: bool):
     oldVals = []
     if notInsertOrModify:
         oldVals = backend.getTableDataByPk(tableName, pkVal)
-
     row = 1
     valRow = 0
 
@@ -213,7 +279,7 @@ def modifyPopUp(tableName: str, pkVal, notInsertOrModify: bool):
         else:
             val = 0
         # If value is not pk
-        if valRow + 1 != table[backend.PK][0]:
+        if len(table[backend.PK]) > 0 and valRow + 1 != table[backend.PK][0]:
             # Add column name
             ttk.Label(valuesGrid, text=columnInfo[0]).grid(row=row, column=1, pady=15, padx=15)
 
@@ -232,7 +298,10 @@ def modifyPopUp(tableName: str, pkVal, notInsertOrModify: bool):
                 for valTuple in referencedVals:
                     # Concat vals (first val will always be PK)
                     refNr = backend.getTableNumber(referencedTable)
-                    pkNr = backend.tableInfo[refNr][backend.PK][0]
+                    if len(backend.tableInfo[refNr][backend.PK]) > 0:
+                        pkNr = backend.tableInfo[refNr][backend.PK][0]
+                    else:
+                        pkNr = -1
 
                     tupleString = convertToPrintableString(valTuple[pkNr - 1]) + " "
                     tupleNr = 0
@@ -245,11 +314,22 @@ def modifyPopUp(tableName: str, pkVal, notInsertOrModify: bool):
                         variable.set(tupleString)
                     optList.append(tupleString)
 
+                # Add null option
+                optList.append("NULL")
+
                 # Create drop down menu
+                drop = None
                 if len(optList) > 0:
-                    tk.OptionMenu(valuesGrid, variable, optList[0], *(optList[1:])).grid(row=row, column=2)
+                    drop = tk.OptionMenu(valuesGrid, variable, *optList)
+                    drop.grid(row=row, column=2)
                 else:
-                        variable.set("NULL")
+                    variable.set("NULL")
+
+                # Add insert new value for FK
+                ttk.Button(valuesGrid, text="+", width=1,
+                           command=lambda arg1=referencedTable, arg2=modifyWindow, arg3=drop, arg4=variable: modifyPopUp(arg1, None, False, False,
+                                    master=arg2, menu=arg3, manuVar=arg4)) \
+                    .grid(row=row, column=3)
 
             else:
                 # Normal entry if not FK
@@ -267,14 +347,16 @@ def modifyPopUp(tableName: str, pkVal, notInsertOrModify: bool):
 
     # Modify button
     ttk.Button(modifyWindow, text="Modify" if notInsertOrModify else "Insert",
-               command=lambda: modifyAction(modifyWindow, valuesGrid, fkNewVals, tableName, pkVal, notInsertOrModify)) \
+               command=lambda: modifyAction(modifyWindow, valuesGrid,
+                                            fkNewVals, tableName, pkVal,
+                                            notInsertOrModify, savepoint, switchTable, master, menu, manuVar)) \
         .grid(row=4, column=1, pady=5)
 
 
 def setTableScreen(tableName: str):
     global currPanel, mainWindow
     tableNr = backend.getTableNumber(tableName)
-    pkCol = backend.tableInfo[tableNr][backend.PK][0]
+    pkCol = backend.tableInfo[tableNr][backend.PK][0] if len(backend.tableInfo[tableNr][backend.PK]) else -1
     nrCols = len(backend.tableInfo[tableNr][backend.COLUMNS])
 
     if currPanel is not None:
@@ -340,7 +422,7 @@ def setTableScreen(tableName: str):
             col += 1
         i += 1
 
-    canvas.grid(row=2, column=2)
+    canvas.grid(row=2, column=2, padx=5)
     scrollbar1.grid(row=2, column=3, sticky="NS")
     scrollbar2.grid(row=3, column=2, sticky="EW")
 
@@ -406,7 +488,7 @@ def savepointPopUp():
 
     ttk.Entry(savepointWindow, name="savepointName", width=32).grid(row=2, pady=5, padx=5)
     ttk.Label(savepointWindow, text="\tInsert savepoint name").grid(row=1, sticky="EW", pady=5, padx=5)
-    ttk.Button(savepointWindow, text="Create savepoint", command=lambda: savepointAction(savepointWindow))\
+    ttk.Button(savepointWindow, text="Create savepoint", command=lambda: savepointAction(savepointWindow)) \
         .grid(row=3, pady=5, padx=5)
 
     savepointWindow.mainloop()
@@ -437,7 +519,7 @@ def rollbackPopUp():
 
 
 def executeAction(textWidget, canvas):
-
+    canvas.delete("all")
     tableGrid = ttk.Frame(canvas)
     tableGrid.bind(
         "<Configure>",
@@ -459,6 +541,8 @@ def executeAction(textWidget, canvas):
             col += 1
         i += 1
 
+    canvas.grid(row=2, column=1)
+
 
 def setTerminalScreen():
     global currPanel, mainWindow
@@ -474,7 +558,7 @@ def setTerminalScreen():
     currPanel = ttk.Frame(mainWindow)
 
     # Results label
-    ttk.Label(currPanel, text="Results", font=font.Font(size=14, weight='bold'))\
+    ttk.Label(currPanel, text="Results", font=font.Font(size=14, weight='bold')) \
         .grid(row=1, column=1, pady=20)
 
     # Create scrollable canvas

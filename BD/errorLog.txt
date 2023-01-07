@@ -1,3 +1,0 @@
-2022-12-28 17:03:57.070112: : Failed to connect to database: ORA-12560: TNS:protocol adapter error
-2022-12-28 17:09:03.397345: : Failed to connect to database: ORA-01017: invalid username/password; logon denied
-2022-12-28 17:10:28.222925: : Failed to connect to database: ORA-28009: connection as SYS should be as SYSDBA or SYSOPER

@@ -121,7 +121,6 @@ def initSession(dsn: str, user: str, password: str):
 
     # Get table columns
     for infoTuple in tableInfo:
-        # TO DO
         qResult = executeQuery("SELECT column_name, data_type FROM user_tab_cols WHERE table_name = \'"
                                + infoTuple[TABLE_NAME] + "\' ORDER BY column_id")
         for x in qResult:
@@ -154,21 +153,37 @@ def initSession(dsn: str, user: str, password: str):
 def createSavepoint(savePointName: str):
 
     # Check for valid savepoint name
+    nextVal = 1
+    found = False
     if savePointName is None or savePointName == "":
-        found = False
+
         savePointName = "Savepoint1"
         nextVal = 2
-        while not found:
-            if savePointName not in savepointList:
-                found = True
-            else:
+
+    while not found:
+        if savePointName not in savepointList:
+            found = True
+        else:
+
+            if savePointName.endswith(str(nextVal - 1)):
                 savePointName = savePointName[:len(savePointName) - len(str(nextVal - 1))] + str(nextVal)
-                nextVal += 1
+            else:
+                savePointName += str(nextVal)
+            nextVal += 1
 
     # Add the savepoint to savepoint list
     savepointList.append(savePointName)
     # Execute query
     executeQuery("SAVEPOINT " + savePointName)
+
+    return savePointName
+
+
+def deteleSavepoint(savePointName: str):
+    try:
+        savepointList.remove(savePointName)
+    except:
+        pass
 
 
 def rollbackTo(savePointName: str):
